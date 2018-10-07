@@ -19,6 +19,8 @@ Flow binary (`flow`) is expected to be available in `node_modules/.bin/flow` (no
 $ npm install --save-dev jchavarri/genBindings
 ```
 
+Add `genBindings` to `.babelrc`.
+
 ## Usage
 
 ### Via `.babelrc` (Recommended)

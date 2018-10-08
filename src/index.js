@@ -16,6 +16,10 @@ const typeFromFlowKind = kind => {
     return "string";
   }
 };
+const typeFromProp = (prop /* : {kind, type, polarity, optional} */) => {
+  const type = typeFromFlowKind(prop.type.kind);
+  return prop.optional ? `optional(${type})` : type;
+};
 
 const camelize = str => {
   return str
@@ -25,10 +29,28 @@ const camelize = str => {
     .replace(/\s+/g, "");
 };
 
+const getFlowTypes = (fileName, line, column) => {
+  const flowPath = "node_modules/.bin/flow"; // TODO: add config
+  if (!fs.existsSync(flowPath)) {
+    console.warn(`genBindings: Couldn\'t find flow at path ${flowPath}.`);
+    return;
+  }
+  return spawnSync(
+    flowPath,
+    ["type-at-pos", "--expand-json-output", fileName, line, column],
+    { encoding: "utf8" }
+  ).stdout;
+};
+
+const external = (path, name, rest) => {
+  return `[@bs.module "./${path}"] external ${name}${rest};\n`;
+};
+
 module.exports = function({ types: t }) {
   return {
     pre(state) {
       this.cache = "";
+      this.typeAliases = [];
     },
     post(state) {
       if (typeof this.opts.output === "function") {
@@ -54,6 +76,45 @@ module.exports = function({ types: t }) {
       }
     },
     visitor: {
+      TypeAlias({ node, hub }, state) {
+        if (
+          node.leadingComments &&
+          node.leadingComments.map(getValue).some(isDrillTypeComment)
+        ) {
+          const id = node.id;
+          const loc = getLoc(id);
+          const flowOutput = getFlowTypes(
+            hub.file.opts.filename,
+            loc.start.line,
+            loc.start.column + 1
+          );
+          const expandedType = JSON.parse(flowOutput).expanded_type;
+          if (!expandedType) {
+            return;
+          }
+          if (expandedType.kind === "TypeAlias") {
+            if (!expandedType.exact) {
+              // TODO: Add notice on output code
+            }
+            const recordFields = expandedType.body.props
+              .map(p => {
+                if (p.kind === "NamedProp") {
+                  /* y: float, */
+                  return `${p.prop.name}: ${typeFromProp(p.prop.prop)}`;
+                } else if (p.kind === "IndexProp") {
+                  /* ['y']: float, */
+                } else {
+                  /* TODO: What else is there? */
+                }
+              })
+              .filter(p => Boolean(p))
+              .join(", ");
+            const binding = `type ${id.name} = { ${recordFields} };\n\n`;
+            this.cache = this.cache + binding;
+            this.typeAliases[id.name] = expandedType; //TODO: Figure out scope hoisting
+          }
+        }
+      },
       ExportNamedDeclaration({ node, hub }, state) {
         if (
           node.leadingComments &&
@@ -63,46 +124,64 @@ module.exports = function({ types: t }) {
           declarations.forEach(dec => {
             const loc = getLoc(dec);
 
-            const flowPath = "node_modules/.bin/flow"; // TODO: add config
-            if (!fs.existsSync(flowPath)) {
-              console.warn(
-                `genBindings: Couldn\'t find flow at path ${flowPath}.`
-              );
-              return;
-            }
-
-            const flowOutput = spawnSync(
-              "node_modules/.bin/flow",
-              [
-                "type-at-pos",
-                "--expand-json-output",
-                hub.file.opts.filename,
-                loc.start.line,
-                loc.start.column + 1
-              ],
-              { encoding: "utf8" }
+            const flowOutput = getFlowTypes(
+              hub.file.opts.filename,
+              loc.start.line,
+              loc.start.column + 1
             );
-            if (!flowOutput.stdout) {
+            if (!flowOutput) {
               console.warn(`genBindings: Could not read output from Flow.`);
               return;
             }
-            const expandedType = JSON.parse(flowOutput.stdout).expanded_type;
+            const expandedType = JSON.parse(flowOutput).expanded_type;
             if (!expandedType) {
               return;
             }
             const declarationName = dec.id.name;
             const reasonDecName = declarationName.toLowerCase();
+
             if (expandedType.kind === "Str") {
               const binding =
-                '[@bs.module "./' +
-                path.basename(hub.file.opts.filename) +
-                '"]\n' +
-                "external " +
-                reasonDecName +
-                ' : string = "' +
-                (reasonDecName !== declarationName ? declarationName : "") +
-                '";\n\n';
+                external(
+                  path.basename(hub.file.opts.filename),
+                  reasonDecName,
+                  `: string = "${
+                    reasonDecName !== declarationName ? declarationName : ""
+                  }"`
+                ) + "\n";
               this.cache = this.cache + binding;
+            } else if (expandedType.kind === "Obj") {
+              console.log(expandedType);
+              this.cache =
+                this.cache +
+                `/* Exported value "${reasonDecName}" has type "Object", which can't be represented in Reason / OCaml. */\n` +
+                `/* This can be fixed by explicitly annotating the exported value with a type that has been previously defined */\n\n`;
+            } else if (expandedType.kind === "Generic") {
+              const aliasedType = this.typeAliases[expandedType.type.name];
+              // TODO: Add missing aliasedType handling
+              if (!aliasedType) {
+                throw Error("Missing alias type");
+              }
+              const binding = external(
+                path.basename(hub.file.opts.filename),
+                reasonDecName,
+                ': Js.t(\'a) = ""'
+              );
+              const converterFromType = aliasedType.body.props
+                .map(p => {
+                  if (p.kind === "NamedProp") {
+                    /* y: float, */
+                    return `${p.prop.name}: ${reasonDecName}##${p.prop.name}`;
+                  } else if (p.kind === "IndexProp") {
+                    /* ['y']: float, */
+                  } else {
+                    /* TODO: What else is there? */
+                  }
+                })
+                .filter(p => Boolean(p))
+                .join(", ");
+              const converter = `let ${reasonDecName} = {${converterFromType}};`;
+              this.cache = this.cache + binding + converter;
             } else if (expandedType.kind === "Fun") {
               const hasAny = checkAny(
                 expandedType.paramTypes.concat([expandedType.returnType])
@@ -114,21 +193,22 @@ module.exports = function({ types: t }) {
                 return;
               } else {
                 const binding =
-                  '[@bs.module "./' +
-                  path.basename(hub.file.opts.filename) +
-                  '"]\n' +
-                  "external " +
-                  reasonDecName +
-                  ": (" +
-                  expandedType.paramTypes
-                    .map(getKind)
-                    .map(typeFromFlowKind)
-                    .join(", ") +
-                  ") => " +
-                  typeFromFlowKind(expandedType.returnType.kind) +
-                  ' = "' +
-                  (reasonDecName !== declarationName ? declarationName : "") +
-                  '";\n\n';
+                  external(
+                    path.basename(hub.file.opts.filename),
+                    reasonDecName,
+                    ": (" +
+                      expandedType.paramTypes
+                        .map(getKind)
+                        .map(typeFromFlowKind)
+                        .join(", ") +
+                      ") => " +
+                      typeFromFlowKind(expandedType.returnType.kind) +
+                      ' = "' +
+                      (reasonDecName !== declarationName
+                        ? declarationName
+                        : "") +
+                      '"'
+                  ) + "\n";
                 this.cache = this.cache + binding;
               }
             }

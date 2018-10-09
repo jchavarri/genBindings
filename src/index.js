@@ -42,6 +42,22 @@ const getFlowTypes = (fileName, line, column) => {
   ).stdout;
 };
 
+const objectFields = props => {
+  return props
+    .map(p => {
+      if (p.kind === "NamedProp") {
+        /* y: float, */
+        return `${p.prop.name}: ${typeFromProp(p.prop.prop)}`;
+      } else if (p.kind === "IndexProp") {
+        /* ['y']: float, */
+      } else {
+        /* TODO: What else is there? */
+      }
+    })
+    .filter(p => Boolean(p))
+    .join(", ");
+};
+
 const external = (path, name, rest) => {
   return `[@bs.module "./${path}"] external ${name}${rest};\n`;
 };
@@ -96,19 +112,7 @@ module.exports = function({ types: t }) {
             if (!expandedType.exact) {
               // TODO: Add notice on output code
             }
-            const recordFields = expandedType.body.props
-              .map(p => {
-                if (p.kind === "NamedProp") {
-                  /* y: float, */
-                  return `${p.prop.name}: ${typeFromProp(p.prop.prop)}`;
-                } else if (p.kind === "IndexProp") {
-                  /* ['y']: float, */
-                } else {
-                  /* TODO: What else is there? */
-                }
-              })
-              .filter(p => Boolean(p))
-              .join(", ");
+            const recordFields = objectFields(expandedType.body.props);
             const binding = `type ${id.name} = { ${recordFields} };\n\n`;
             this.cache = this.cache + binding;
             this.typeAliases[id.name] = expandedType; //TODO: Figure out scope hoisting
@@ -148,14 +152,17 @@ module.exports = function({ types: t }) {
                   `: string = "${
                     reasonDecName !== declarationName ? declarationName : ""
                   }"`
-                ) + "\n";
+                ) + '\n';
               this.cache = this.cache + binding;
             } else if (expandedType.kind === "Obj") {
-              console.log(expandedType);
+              const recordFields = objectFields(expandedType.props);
+              const binding = external(
+                path.basename(hub.file.opts.filename),
+                reasonDecName,
+                `: Js.t({. ${recordFields} }) = ""`
+              ) + '\n';
               this.cache =
-                this.cache +
-                `/* Exported value "${reasonDecName}" has type "Object", which can't be represented in Reason / OCaml. */\n` +
-                `/* This can be fixed by explicitly annotating the exported value with a type that has been previously defined */\n\n`;
+                this.cache + binding;
             } else if (expandedType.kind === "Generic") {
               const aliasedType = this.typeAliases[expandedType.type.name];
               // TODO: Add missing aliasedType handling

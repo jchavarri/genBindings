@@ -1,8 +1,9 @@
 const { spawnSync } = require("child_process");
 const path = require("path");
 const fs = require("fs");
+const { decode } = require("./DecodeFlowJson.bs");
 
-const isDrillTypeComment = commentValue =>
+const isGenBindingsComment = commentValue =>
   commentValue.includes("@genBindings");
 const getValue = comment => comment.value;
 const getLoc = declaration => declaration.loc;
@@ -95,7 +96,7 @@ module.exports = function({ types: t }) {
       TypeAlias({ node, hub }, state) {
         if (
           node.leadingComments &&
-          node.leadingComments.map(getValue).some(isDrillTypeComment)
+          node.leadingComments.map(getValue).some(isGenBindingsComment)
         ) {
           const id = node.id;
           const loc = getLoc(id);
@@ -122,7 +123,7 @@ module.exports = function({ types: t }) {
       ExportNamedDeclaration({ node, hub }, state) {
         if (
           node.leadingComments &&
-          node.leadingComments.map(getValue).some(isDrillTypeComment)
+          node.leadingComments.map(getValue).some(isGenBindingsComment)
         ) {
           const declarations = node.declaration.declarations;
           declarations.forEach(dec => {
@@ -152,17 +153,17 @@ module.exports = function({ types: t }) {
                   `: string = "${
                     reasonDecName !== declarationName ? declarationName : ""
                   }"`
-                ) + '\n';
+                ) + "\n";
               this.cache = this.cache + binding;
             } else if (expandedType.kind === "Obj") {
               const recordFields = objectFields(expandedType.props);
-              const binding = external(
-                path.basename(hub.file.opts.filename),
-                reasonDecName,
-                `: Js.t({. ${recordFields} }) = ""`
-              ) + '\n';
-              this.cache =
-                this.cache + binding;
+              const binding =
+                external(
+                  path.basename(hub.file.opts.filename),
+                  reasonDecName,
+                  `: Js.t({. ${recordFields} }) = ""`
+                ) + "\n";
+              this.cache = this.cache + binding;
             } else if (expandedType.kind === "Generic") {
               const aliasedType = this.typeAliases[expandedType.type.name];
               // TODO: Add missing aliasedType handling

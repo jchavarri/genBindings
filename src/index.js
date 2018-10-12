@@ -19,7 +19,7 @@ const typeFromFlowKind = kind => {
 };
 const typeFromProp = (prop /* : {kind, type, polarity, optional} */) => {
   const type = typeFromFlowKind(prop.type.kind);
-  return prop.optional ? `optional(${type})` : type;
+  return prop.optional ? `option(${type})` : type;
 };
 
 const camelize = str => {

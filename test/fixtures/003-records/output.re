@@ -1,4 +1,4 @@
-type coord = { x: float, y: float, z: optional(float) };
+type coord = { x: float, y: float, z: option(float) };
 
 [@bs.module "./input.js"] external origin: Js.t({. x: float, y: float, z: float }) = "";
 

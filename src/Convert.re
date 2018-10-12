@@ -7,5 +7,5 @@ let typeFromFlowKind = kind =>
 /*
 let typeFromProp = prop /* : {kind, type, polarity, optional} */ => {
   let typ_ = typeFromFlowKind(prop.typ_.kind);
-  prop.optional ? {j|optional($typ_)|j} : typ_;
+  prop.optional ? {j|option($typ_)|j} : typ_;
 }; */

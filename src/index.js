@@ -50,6 +50,22 @@ const getFlowTypes = (fileName, line, column) => {
   ).stdout;
 };
 
+const objectFields = props => {
+  return props
+    .map(p => {
+      if (p.kind === "NamedProp") {
+        /* y: float, */
+        return `${p.prop.name}: ${String(typeFromProp(p.prop.prop))}`;
+      } else if (p.kind === "IndexProp") {
+        /* ['y']: float, */
+      } else {
+        /* TODO: What else is there? */
+      }
+    })
+    .filter(p => Boolean(p))
+    .join(", ");
+};
+
 const external = (path, name, rest) => {
   return `[@bs.module "./${path}"] external ${name}${rest};\n`;
 };
@@ -178,10 +194,10 @@ module.exports = function({ types: t } /*: {types: Object} */) {
             if (!expandedType.exact) {
               // TODO: Add notice on output code
             }
-            // const recordFields = objectFields(expandedType.body.props);
-            // const binding = `type ${id.name} = { ${recordFields} };\n\n`;
-            // this.cache = this.cache + binding;
-            // this.typeAliases[id.name] = expandedType; //TODO: Figure out scope hoisting
+            const recordFields = objectFields(expandedType.body.props);
+            const binding = `type ${id.name} = { ${recordFields} };\n\n`;
+            this.cache = this.cache + binding;
+            this.typeAliases[id.name] = expandedType; //TODO: Figure out scope hoisting
           }
         }
       },
@@ -223,7 +239,6 @@ module.exports = function({ types: t } /*: {types: Object} */) {
                 path.basename(hub.file.opts.filename),
                 declarationName
               );
-              console.log(`binding: ${binding}`);
 
               if (binding.length > 0) {
                 this.cache = this.cache + binding;
@@ -231,8 +246,7 @@ module.exports = function({ types: t } /*: {types: Object} */) {
                 const aliasedType = this.typeAliases[expandedType.type.name];
                 // TODO: Add missing aliasedType handling
                 if (!aliasedType) {
-                  return;
-                  // throw Error("Missing alias type");
+                  throw Error("Missing alias type");
                 }
                 const binding = external(
                   path.basename(hub.file.opts.filename),

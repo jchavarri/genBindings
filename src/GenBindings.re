@@ -1,12 +1,27 @@
 let emitExternal = (path, name, rest) => {j|[@bs.module "./$path"] external $name$rest;\n|j};
 
+let emitType = t =>
+  switch (t) {
+  | DecodeFlowJson.Num => "float"
+  | Str => "string"
+  | Bool => "bool"
+  | _ => failwith("unsupported type")
+  };
+
 let emitObjectFields = props =>
   props
   ->Belt.List.map(p =>
       switch (p) {
-      | DecodeFlowJson.NamedProp(id) =>
+      | DecodeFlowJson.NamedProp(id, namedProp) =>
         /* y: float, */
-        id
+        let annotation =
+          switch (namedProp) {
+          | Field(t, field) =>
+            let typ = emitType(t);
+            field.fldOptional ? {j|optional($typ)|j} : typ;
+          | _ => failwith("unsupported named prop type")
+          };
+        id ++ ": " ++ annotation;
       | IndexProp /* ['y']: float, */
       | CallProp => ""
       }

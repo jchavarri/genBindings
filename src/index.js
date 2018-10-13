@@ -1,7 +1,8 @@
+// @flow
 const { spawnSync } = require("child_process");
 const path = require("path");
 const fs = require("fs");
-const { decode } = require("./DecodeFlowJson.bs");
+const { fromJson } = require("./GenBindings.bs");
 
 const isGenBindingsComment = commentValue =>
   commentValue.includes("@genBindings");
@@ -17,7 +18,7 @@ const typeFromFlowKind = kind => {
     return "string";
   }
 };
-const typeFromProp = (prop /* : {kind, type, polarity, optional} */) => {
+const typeFromProp = (prop /* {kind, type, polarity, optional} */) => {
   const type = typeFromFlowKind(prop.type.kind);
   return prop.optional ? `option(${type})` : type;
 };
@@ -38,38 +39,93 @@ const getFlowTypes = (fileName, line, column) => {
   }
   return spawnSync(
     flowPath,
-    ["type-at-pos", "--expand-json-output", fileName, line, column],
+    [
+      "type-at-pos",
+      "--expand-json-output",
+      fileName,
+      String(line),
+      String(column)
+    ],
     { encoding: "utf8" }
   ).stdout;
-};
-
-const objectFields = props => {
-  return props
-    .map(p => {
-      if (p.kind === "NamedProp") {
-        /* y: float, */
-        return `${p.prop.name}: ${typeFromProp(p.prop.prop)}`;
-      } else if (p.kind === "IndexProp") {
-        /* ['y']: float, */
-      } else {
-        /* TODO: What else is there? */
-      }
-    })
-    .filter(p => Boolean(p))
-    .join(", ");
 };
 
 const external = (path, name, rest) => {
   return `[@bs.module "./${path}"] external ${name}${rest};\n`;
 };
 
-module.exports = function({ types: t }) {
+/*::
+type Node = {|
+  type: string,
+  leadingComments?: Comment[],
+  innerComments?: Comment[],
+  trailingComments?: Comment[],
+  start: number,
+  end: number,
+  loc: SourceLocation
+|};
+type SourceLocation = {|
+  start: {|
+    line: number,
+    column: number
+  |},
+  end: {|
+    line: number,
+    column: number
+  |}
+|};
+type Comment = {|
+  type: "CommentBlock" | "CommentLine",
+  value: string,
+  start: number,
+  end: number,
+  loc: SourceLocation
+|};
+type Identifier = {|
+  ...Node,
+  type: "Identifier",
+  name: string,
+  typeAnnotation?: Object // TypeAnnotation {...Node, type: "TypeAnnotation", typeAnnotation: FlowTypeAnnotation}
+|};
+type DeclareTypeAlias = {|
+  ...Node,
+  type: "DeclareTypeAlias",
+  id: Identifier
+  // typeParameters: //TypeParameterDeclaration,
+  // right: FlowTypeAnnotation
+|};
+type ExportNamedDeclaration = {|
+  ...Node,
+  type: "ExportNamedDeclaration",
+  declaration: Declaration
+  // specifiers: ExportSpecifier[]
+  //source: StringLiteral | null
+|};
+type VariableDeclaration = {|
+  ...Node,
+  type: "VariableDeclaration",
+  declarations: VariableDeclarator[],
+  kind: "var" | "let" | "const"
+|};
+type VariableDeclarator = {|
+  ...Node,
+  type: "VariableDeclarator",
+  id: LVal;
+  // init: Expression;
+|};
+type LVal = Identifier; // | MemberExpression | RestElement | AssignmentPattern | ArrayPattern | ObjectPattern | TSParameterProperty;
+type Declaration = VariableDeclaration | DeclareTypeAlias; // Missing a lot: https://github.com/DefinitelyTyped/DefinitelyTyped/blob/65fcea8f3e9affa54ebdd45bfaee98ea0c85f939/types/babel-types/index.d.ts#L1256
+
+type State = {| cache: string, typeAliases: [string] |};
+*/
+
+module.exports = function({ types: t } /*: {types: Object} */) {
   return {
-    pre(state) {
+    pre(state /*: State */) {
       this.cache = "";
       this.typeAliases = [];
     },
-    post(state) {
+    post(state /*: State */) {
       if (typeof this.opts.output === "function") {
         this.opts.output(this.cache);
       } else {
@@ -93,7 +149,10 @@ module.exports = function({ types: t }) {
       }
     },
     visitor: {
-      TypeAlias({ node, hub }, state) {
+      TypeAlias(
+        { node, hub } /*: {| node: DeclareTypeAlias, hub: Object |} */,
+        state /*: State */
+      ) {
         if (
           node.leadingComments &&
           node.leadingComments.map(getValue).some(isGenBindingsComment)
@@ -105,7 +164,13 @@ module.exports = function({ types: t }) {
             loc.start.line,
             loc.start.column + 1
           );
-          const expandedType = JSON.parse(flowOutput).expanded_type;
+          if (!flowOutput) {
+            console.error(
+              "genBindings: Could not read output from Flow binary. Is `flow-bin` installed locally?"
+            );
+            return;
+          }
+          const expandedType = JSON.parse(flowOutput.toString()).expanded_type;
           if (!expandedType) {
             return;
           }
@@ -113,114 +178,114 @@ module.exports = function({ types: t }) {
             if (!expandedType.exact) {
               // TODO: Add notice on output code
             }
-            const recordFields = objectFields(expandedType.body.props);
-            const binding = `type ${id.name} = { ${recordFields} };\n\n`;
-            this.cache = this.cache + binding;
-            this.typeAliases[id.name] = expandedType; //TODO: Figure out scope hoisting
+            // const recordFields = objectFields(expandedType.body.props);
+            // const binding = `type ${id.name} = { ${recordFields} };\n\n`;
+            // this.cache = this.cache + binding;
+            // this.typeAliases[id.name] = expandedType; //TODO: Figure out scope hoisting
           }
         }
       },
-      ExportNamedDeclaration({ node, hub }, state) {
+      ExportNamedDeclaration(
+        { node, hub } /*: {| node: ExportNamedDeclaration, hub: Object |} */,
+        state /*: State */
+      ) {
         if (
           node.leadingComments &&
           node.leadingComments.map(getValue).some(isGenBindingsComment)
         ) {
-          const declarations = node.declaration.declarations;
-          declarations.forEach(dec => {
-            const loc = getLoc(dec);
+          const declaration = node.declaration;
+          if (declaration.type === "VariableDeclaration") {
+            const declarations = declaration.declarations;
+            declarations.forEach(dec => {
+              const loc = getLoc(dec);
 
-            const flowOutput = getFlowTypes(
-              hub.file.opts.filename,
-              loc.start.line,
-              loc.start.column + 1
-            );
-            if (!flowOutput) {
-              console.warn(`genBindings: Could not read output from Flow.`);
-              return;
-            }
-            const expandedType = JSON.parse(flowOutput).expanded_type;
-            if (!expandedType) {
-              return;
-            }
-            const declarationName = dec.id.name;
-            const reasonDecName = declarationName.toLowerCase();
-
-            if (expandedType.kind === "Str") {
-              const binding =
-                external(
-                  path.basename(hub.file.opts.filename),
-                  reasonDecName,
-                  `: string = "${
-                    reasonDecName !== declarationName ? declarationName : ""
-                  }"`
-                ) + "\n";
-              this.cache = this.cache + binding;
-            } else if (expandedType.kind === "Obj") {
-              const recordFields = objectFields(expandedType.props);
-              const binding =
-                external(
-                  path.basename(hub.file.opts.filename),
-                  reasonDecName,
-                  `: Js.t({. ${recordFields} }) = ""`
-                ) + "\n";
-              this.cache = this.cache + binding;
-            } else if (expandedType.kind === "Generic") {
-              const aliasedType = this.typeAliases[expandedType.type.name];
-              // TODO: Add missing aliasedType handling
-              if (!aliasedType) {
-                throw Error("Missing alias type");
-              }
-              const binding = external(
-                path.basename(hub.file.opts.filename),
-                reasonDecName,
-                ': Js.t(\'a) = ""'
+              const flowOutput = getFlowTypes(
+                hub.file.opts.filename,
+                loc.start.line,
+                loc.start.column + 1
               );
-              const converterFromType = aliasedType.body.props
-                .map(p => {
-                  if (p.kind === "NamedProp") {
-                    /* y: float, */
-                    return `${p.prop.name}: ${reasonDecName}##${p.prop.name}`;
-                  } else if (p.kind === "IndexProp") {
-                    /* ['y']: float, */
-                  } else {
-                    /* TODO: What else is there? */
-                  }
-                })
-                .filter(p => Boolean(p))
-                .join(", ");
-              const converter = `let ${reasonDecName} = {${converterFromType}};`;
-              this.cache = this.cache + binding + converter;
-            } else if (expandedType.kind === "Fun") {
-              const hasAny = checkAny(
-                expandedType.paramTypes.concat([expandedType.returnType])
-              );
-              if (hasAny) {
-                this.cache =
-                  this.cache +
-                  `/* Exported function "${reasonDecName}" has parameter types or returned type "any" and can't be exported. */\n\n`;
+              if (!flowOutput) {
+                console.error(
+                  "genBindings: Could not read output from Flow binary. Is `flow-bin` installed locally?"
+                );
                 return;
-              } else {
-                const binding =
-                  external(
-                    path.basename(hub.file.opts.filename),
-                    reasonDecName,
-                    ": (" +
-                      expandedType.paramTypes
-                        .map(getKind)
-                        .map(typeFromFlowKind)
-                        .join(", ") +
-                      ") => " +
-                      typeFromFlowKind(expandedType.returnType.kind) +
-                      ' = "' +
-                      (reasonDecName !== declarationName
-                        ? declarationName
-                        : "") +
-                      '"'
-                  ) + "\n";
-                this.cache = this.cache + binding;
               }
-            }
-          });
+              const expandedType = JSON.parse(flowOutput.toString())
+                .expanded_type;
+              if (!expandedType) {
+                return;
+              }
+              const declarationName = dec.id.name;
+              const reasonDecName = declarationName.toLowerCase();
+
+              const binding = fromJson(
+                expandedType,
+                path.basename(hub.file.opts.filename),
+                declarationName
+              );
+              console.log(`binding: ${binding}`);
+
+              if (binding.length > 0) {
+                this.cache = this.cache + binding;
+              } else if (expandedType.kind === "Generic") {
+                const aliasedType = this.typeAliases[expandedType.type.name];
+                // TODO: Add missing aliasedType handling
+                if (!aliasedType) {
+                  return;
+                  // throw Error("Missing alias type");
+                }
+                const binding = external(
+                  path.basename(hub.file.opts.filename),
+                  reasonDecName,
+                  ': Js.t(\'a) = ""'
+                );
+                const converterFromType = aliasedType.body.props
+                  .map(p => {
+                    if (p.kind === "NamedProp") {
+                      /* y: float, */
+                      return `${p.prop.name}: ${reasonDecName}##${p.prop.name}`;
+                    } else if (p.kind === "IndexProp") {
+                      /* ['y']: float, */
+                    } else {
+                      /* TODO: What else is there? */
+                    }
+                  })
+                  .filter(p => Boolean(p))
+                  .join(", ");
+                const converter = `let ${reasonDecName} = {${converterFromType}};`;
+                this.cache = this.cache + binding + converter;
+              } else if (expandedType.kind === "Fun") {
+                const hasAny = checkAny(
+                  expandedType.paramTypes.concat([expandedType.returnType])
+                );
+                if (hasAny) {
+                  this.cache =
+                    this.cache +
+                    `/* Exported function "${reasonDecName}" has parameter types or returned type "any" and can't be exported. */\n\n`;
+                  return;
+                } else {
+                  const binding =
+                    external(
+                      path.basename(hub.file.opts.filename),
+                      reasonDecName,
+                      ": (" +
+                        expandedType.paramTypes
+                          .map(getKind)
+                          .map(typeFromFlowKind)
+                          .join(", ") +
+                        ") => " +
+                        typeFromFlowKind(expandedType.returnType.kind) +
+                        ' = "' +
+                        (reasonDecName !== declarationName
+                          ? declarationName
+                          : "") +
+                        '"'
+                    ) + "\n";
+                  this.cache = this.cache + binding;
+                }
+              }
+            });
+          }
         }
       }
     }

@@ -7,10 +7,11 @@ type t =
   | TypeAlias
   | Obj(objT)
   | Generic
-  | Fun
+  | Fun(funT)
   | Num
   | Str
   | Bool
+  | Any
 and polarity =
   | Positive
   | Negative
@@ -28,10 +29,10 @@ and typeParam = {
   tpDefault: option(t),
 }
 and funT = {
-  funParams: list((option(identifier), t, funParam)),
+  funTypeParams: option(list(typeParam)),
+  funParams: list(t), /* list((option(identifier), t, funParam)), */
   funRestParam: option((option(identifier), t)),
   funReturn: t,
-  funTypeParams: option(list(typeParam)),
 }
 and namedProp =
   | Field(t, field)
@@ -110,11 +111,39 @@ and propDecoder = json =>
       | _ => raise(Failure("Invalid type for prop when decoding Flow json"))
       }
   )
+and typeParamDecoder = json => {
+  tpName: json |> field("name", string),
+  tpBound: json |> optional(field("bound", decode)),
+  tpPolarity: json |> decodePolarity,
+  tpDefault: json |> optional(field("default", decode)),
+}
 and objTDecode = json => {
   objExact: json |> field("exact", bool),
   objFrozen: json |> field("frozen", bool),
   objProps:
     json |> field("props", array(propDecoder) |> map(Array.to_list)),
+}
+and funTDecode = json => {
+  funTypeParams:
+    json
+    |> field(
+         "typeParams",
+         optional(array(typeParamDecoder) |> map(Array.to_list)),
+       ),
+  funParams:
+    json |> field("paramTypes", array(decode) |> map(Array.to_list)),
+  funRestParam:
+    json
+    |> field(
+         "restParam",
+         optional(
+           pair(
+             optional(field("restParamName", string)),
+             field("restParamType", decode),
+           ),
+         ),
+       ),
+  funReturn: json |> field("returnType", decode),
 }
 and decode = json =>
   json
@@ -125,10 +154,11 @@ and decode = json =>
       | "TypeAlias" => TypeAlias
       | "Obj" => Obj(objTDecode(json))
       | "Generic" => Generic
-      | "Fun" => Fun
+      | "Fun" => Fun(funTDecode(json))
       | "Num" => Num
       | "Str" => Str
       | "Bool" => Bool
+      | "Any" => Any
       | _ =>
         raise(
           Failure("Invalid type for type 'kind' when decoding Flow json"),

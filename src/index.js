@@ -8,9 +8,7 @@ const isGenBindingsComment = commentValue =>
   commentValue.includes("@genBindings");
 const getValue = comment => comment.value;
 const getLoc = declaration => declaration.loc;
-const getKind = expandedType => expandedType.kind;
 
-const checkAny = arrayTypes => arrayTypes.some(t => t.kind === "Any");
 const typeFromFlowKind = kind => {
   if (kind === "Num") {
     return "float";
@@ -239,7 +237,6 @@ module.exports = function({ types: t } /*: {types: Object} */) {
                 path.basename(hub.file.opts.filename),
                 declarationName
               );
-
               if (binding.length > 0) {
                 this.cache = this.cache + binding;
               } else if (expandedType.kind === "Generic") {
@@ -268,35 +265,6 @@ module.exports = function({ types: t } /*: {types: Object} */) {
                   .join(", ");
                 const converter = `let ${reasonDecName} = {${converterFromType}};`;
                 this.cache = this.cache + binding + converter;
-              } else if (expandedType.kind === "Fun") {
-                const hasAny = checkAny(
-                  expandedType.paramTypes.concat([expandedType.returnType])
-                );
-                if (hasAny) {
-                  this.cache =
-                    this.cache +
-                    `/* Exported function "${reasonDecName}" has parameter types or returned type "any" and can't be exported. */\n\n`;
-                  return;
-                } else {
-                  const binding =
-                    external(
-                      path.basename(hub.file.opts.filename),
-                      reasonDecName,
-                      ": (" +
-                        expandedType.paramTypes
-                          .map(getKind)
-                          .map(typeFromFlowKind)
-                          .join(", ") +
-                        ") => " +
-                        typeFromFlowKind(expandedType.returnType.kind) +
-                        ' = "' +
-                        (reasonDecName !== declarationName
-                          ? declarationName
-                          : "") +
-                        '"'
-                    ) + "\n";
-                  this.cache = this.cache + binding;
-                }
               }
             });
           }

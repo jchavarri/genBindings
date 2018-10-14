@@ -46,6 +46,8 @@ let fromType = (typ, declarationName, baseName) => {
       {j|: Js.t({. $recordFields }) = "$originalName"|j},
     )
     ++ "\n";
+  | Generic(symbol, structural, typeArgsOpt) =>
+    emitExternal(baseName, reasonDecName, {j|: Js.t('a) = ""|j}) ++ "\n"
   | Fun(f) =>
     let hasAny =
       f.funParams

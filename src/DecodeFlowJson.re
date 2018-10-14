@@ -6,12 +6,20 @@ open Json.Decode;
 type t =
   | TypeAlias
   | Obj(objT)
-  | Generic
+  | Generic(symbol, bool /* structural */, option(list(t)))
   | Fun(funT)
   | Num
   | Str
   | Bool
   | Any
+and provenance =
+  | Local /*(Loc.t)*/ /* Defined locally */
+  | Imported /*(Loc.t)*/ /* Defined remotely, imported to file */
+  | Remote /*(Loc.t)*/ /* Defined remotely, NOT imported to file */
+  | Library /*(Loc.t)*/ /* Defined in library */
+  | Builtin
+and symbol =
+  | Symbol(provenance, identifier)
 and polarity =
   | Positive
   | Negative
@@ -145,6 +153,13 @@ and funTDecode = json => {
        ),
   funReturn: json |> field("returnType", decode),
 }
+and decodeSymbol = json =>
+  Symbol(
+    json |> field("provenance", json => Local),
+    json |> field("name", string),
+  )
+and decodeTypeArgs = json =>
+  json |> optional(field("typeArgs", array(decode) |> map(Array.to_list)))
 and decode = json =>
   json
   |> field("kind", string)
@@ -153,7 +168,12 @@ and decode = json =>
       switch (a) {
       | "TypeAlias" => TypeAlias
       | "Obj" => Obj(objTDecode(json))
-      | "Generic" => Generic
+      | "Generic" =>
+        Generic(
+          json |> field("type", decodeSymbol),
+          json |> field("structural", bool),
+          json |> decodeTypeArgs,
+        )
       | "Fun" => Fun(funTDecode(json))
       | "Num" => Num
       | "Str" => Str

@@ -6,12 +6,12 @@ external makeConfig:
 [@bs.module "child_process"]
 external spawnSync:
   (string, array(string), spawnSyncConfig) => {. "stdout": string} =
-  "dirname";
+  "";
 
 let typeAliasesMap = Belt.Map.String.empty;
 
-let getTypeForLoc = loc => {
-  let res = typeAliasesMap->Belt.Map.String.get(loc);
+let getTypeForLoc = (consumerPath: string, loc: Loc.t) => {
+  let res = typeAliasesMap->Belt.Map.String.get(consumerPath);
   switch (res) {
   | Some(t) => t
   | None =>
@@ -24,9 +24,9 @@ let getTypeForLoc = loc => {
       [|
         "type-at-pos",
         "--expand-json-output",
-        /* fileName,
-           String(line),
-           String(column), */
+        loc.source,
+        string_of_int(loc.start.line),
+        string_of_int(loc.start.column),
       |],
       makeConfig(~encoding=`utf8, ()),
     )##stdout;

@@ -47,7 +47,7 @@ let fromType = (typ, declarationName, baseName) => {
     )
     ++ "\n";
   | Generic(symbol, structural, typeArgsOpt) =>
-    emitExternal(baseName, reasonDecName, {j|: Js.t('a) = ""|j}) ++ "\n"
+    emitExternal(baseName, reasonDecName, {j|: Js.t('a) = ""|j}) ++ "\n";
   | Fun(f) =>
     let hasAny =
       f.funParams

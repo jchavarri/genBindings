@@ -9,7 +9,7 @@ let ifNone = (opt, input, f) =>
 
 /* Subset of https://github.com/facebook/flow/blob/7628bde730ba2464dde9a605b062adeff5df84e6/src/common/ty/ty.ml#L11-L33 */
 type t =
-  | TypeAlias /*(typeAlias) */
+  | TypeAlias(typeAlias)
   | Obj(objT)
   | Generic(symbol, bool /* structural */, option(list(t)))
   | Fun(funT)
@@ -244,7 +244,11 @@ and decodeLoc = json =>
     json
     |> field("loc", string)
     |> (
-      str => str->maybeMatchLoc1->ifNone(str, maybeMatchLoc2)->ifNone(str, maybeMatchLoc3)
+      str =>
+        str
+        ->maybeMatchLoc1
+        ->ifNone(str, maybeMatchLoc2)
+        ->ifNone(str, maybeMatchLoc3)
     )
   )
   ->Belt.Option.getExn
@@ -274,26 +278,29 @@ and decodeSymbol = json =>
   )
 and decodeTypeArgs = json =>
   json |> optional(field("typeArgs", array(decode) |> map(Array.to_list)))
-/* and decodeTypeAlias = json => {
-     taName: json |> symbol,
-     taTparams: json |> option(list(typeParam)),
-     taType: json |> option(t)
-   } */
+and decodeTypeAlias = json => {
+  taName: json |> field("name", decodeSymbol),
+  taTparams:
+    json |> field(
+         "typeParams", optional(array(typeParamDecoder) |> map(Array.to_list))),
+  taType: json |> field("body", optional(decode)),
+}
 and decode = json =>
   json
   |> field("kind", string)
   |> (
     a =>
       switch (a) {
-      | "TypeAlias" => TypeAlias /*(decodeTypeAlias)*/
-      | "Obj" => Obj(objTDecode(json))
+      | "TypeAlias" =>
+        TypeAlias(json |> decodeTypeAlias);
+      | "Obj" => Obj(json |> objTDecode)
       | "Generic" =>
         Generic(
           json |> field("type", decodeSymbol),
           json |> field("structural", bool),
           json |> decodeTypeArgs,
         )
-      | "Fun" => Fun(funTDecode(json))
+      | "Fun" => Fun(json |> funTDecode)
       | "Num" => Num
       | "Str" => Str
       | "Bool" => Bool

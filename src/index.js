@@ -188,15 +188,12 @@ module.exports = function({ types: t } /*: {types: Object} */) {
           if (!expandedType) {
             return;
           }
-          if (expandedType.kind === "TypeAlias") {
-            if (!expandedType.exact) {
-              // TODO: Add notice on output code
-            }
-            const recordFields = objectFields(expandedType.body.props);
-            const binding = `type ${id.name} = { ${recordFields} };\n\n`;
-            this.cache = this.cache + binding;
-            this.typeAliases[id.name] = expandedType; //TODO: Figure out scope hoisting
-          }
+          const binding = fromJson(
+            expandedType,
+            path.basename(hub.file.opts.filename),
+            id.name
+          );
+          this.cache = this.cache + binding;
         }
       },
       ExportNamedDeclaration(

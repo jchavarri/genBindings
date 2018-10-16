@@ -1,14 +1,14 @@
-let emitExternal = (path, name, rest) => {j|[@bs.module "./$path"] external $name$rest;\n|j};
-
-let emitType = t =>
+let rec emitType = t =>
   switch (t) {
   | DecodeFlowJson.Num => "float"
   | Str => "string"
   | Bool => "bool"
+  | Obj(obj) =>
+    let recordFields = emitObjectFields(obj.objProps);
+    {j|{ $recordFields }|j};
   | _ => failwith("unsupported type")
-  };
-
-let emitObjectFields = props =>
+  }
+and emitObjectFields = props =>
   props
   ->Belt.List.map(p =>
       switch (p) {
@@ -18,7 +18,7 @@ let emitObjectFields = props =>
           switch (namedProp) {
           | Field(t, field) =>
             let typ = emitType(t);
-            field.fldOptional ? {j|optional($typ)|j} : typ;
+            field.fldOptional ? {j|option($typ)|j} : typ;
           | Method
           | Get
           | Set => failwith("unsupported named prop type")
@@ -30,6 +30,18 @@ let emitObjectFields = props =>
     )
   ->Belt.List.keep(s => Js.String.length(s) > 0)
   |> String.concat(", ");
+
+let emitExternal = (path, name, rest) => {j|[@bs.module "./$path"] external $name$rest;\n|j};
+let emitTypeDeclaration = (name, t) => {
+  let afterName =
+    switch (t) {
+    | Some(t) =>
+      let e = emitType(t);
+      {j| = $e|j};
+    | None => ""
+    };
+  {j|type $name$afterName;\n|j};
+};
 
 let fromType = (typ, declarationName, baseName) => {
   let reasonDecName = Js.String.toLowerCase(declarationName);
@@ -46,8 +58,10 @@ let fromType = (typ, declarationName, baseName) => {
       {j|: Js.t({. $recordFields }) = "$originalName"|j},
     )
     ++ "\n";
-  | Generic(symbol, structural, typeArgsOpt) =>
-    emitExternal(baseName, reasonDecName, {j|: Js.t('a) = ""|j}) ++ "\n";
+  | Generic(_symbol, _structural, _typeArgsOpt) =>
+    emitExternal(baseName, reasonDecName, {j|: Js.t('a) = ""|j}) ++ "\n"
+  | TypeAlias({taName: _, taTparams: _, taType}) =>
+    emitTypeDeclaration(reasonDecName, taType) ++ "\n"
   | Fun(f) =>
     let hasAny =
       f.funParams

@@ -8,10 +8,10 @@ external spawnSync:
   (string, array(string), spawnSyncConfig) => {. "stdout": string} =
   "";
 
-let typeAliasesMap = Belt.Map.String.empty;
+let typesMap = Belt.Map.String.empty;
 
-let getTypeForLoc = (consumerPath: string, loc: Loc.t) => {
-  let res = typeAliasesMap->Belt.Map.String.get(consumerPath);
+let getTypeForLoc = (appearanceLoc, provenanceLoc: Loc.t) => {
+  let res = typesMap->Belt.Map.String.get(appearanceLoc);
   switch (res) {
   | Some(t) => t
   | None =>
@@ -24,9 +24,9 @@ let getTypeForLoc = (consumerPath: string, loc: Loc.t) => {
       [|
         "type-at-pos",
         "--expand-json-output",
-        loc.source,
-        string_of_int(loc.start.line),
-        string_of_int(loc.start.column),
+        provenanceLoc.source,
+        string_of_int(provenanceLoc.start.line),
+        string_of_int(provenanceLoc.start.column),
       |],
       makeConfig(~encoding=`utf8, ()),
     )##stdout;

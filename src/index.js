@@ -9,21 +9,9 @@ const isGenBindingsComment = commentValue =>
 const getValue = comment => comment.value;
 const getLoc = declaration => declaration.loc;
 
-const typeFromFlowKind = kind => {
-  if (kind === "Num") {
-    return "float";
-  } else if (kind === "Str") {
-    return "string";
-  }
-};
-const typeFromProp = (prop /* {kind, type, polarity, optional} */) => {
-  const type = typeFromFlowKind(prop.type.kind);
-  return prop.optional ? `option(${type})` : type;
-};
-
 const camelize = str => {
   return str
-    .replace(/(?:^\w|[A-Z]|\b\w)/g, (letter, index) => {
+    .replace(/(?:^\w|[A-Z]|\b\w)/g, (letter /*, index */) => {
       return letter.toUpperCase();
     })
     .replace(/\s+/g, "");
@@ -32,7 +20,7 @@ const camelize = str => {
 const getFlowTypes = (fileName, line, column) => {
   const flowPath = "node_modules/.bin/flow"; // TODO: add config
   if (!fs.existsSync(flowPath)) {
-    console.warn(`genBindings: Couldn\'t find flow at path ${flowPath}.`);
+    console.warn(`genBindings: Couldn't find flow at path ${flowPath}.`);
     return;
   }
   return spawnSync(
@@ -46,26 +34,6 @@ const getFlowTypes = (fileName, line, column) => {
     ],
     { encoding: "utf8" }
   ).stdout;
-};
-
-const objectFields = props => {
-  return props
-    .map(p => {
-      if (p.kind === "NamedProp") {
-        /* y: float, */
-        return `${p.prop.name}: ${String(typeFromProp(p.prop.prop))}`;
-      } else if (p.kind === "IndexProp") {
-        /* ['y']: float, */
-      } else {
-        /* TODO: What else is there? */
-      }
-    })
-    .filter(p => Boolean(p))
-    .join(", ");
-};
-
-const external = (path, name, rest) => {
-  return `[@bs.module "./${path}"] external ${name}${rest};\n`;
 };
 
 /*::
@@ -133,13 +101,13 @@ type Declaration = VariableDeclaration | DeclareTypeAlias; // Missing a lot: htt
 type State = {| cache: string, typeAliases: [string] |};
 */
 
-module.exports = function({ types: t } /*: {types: Object} */) {
+module.exports = function(/*{ types: t }: {types: Object} */) {
   return {
-    pre(state /*: State */) {
+    pre(/*_state: State */) {
       this.cache = "";
       this.typeAliases = [];
     },
-    post(state /*: State */) {
+    post(/*state: State */) {
       if (typeof this.opts.output === "function") {
         this.opts.output(this.cache);
       } else {
@@ -158,15 +126,17 @@ module.exports = function({ types: t } /*: {types: Object} */) {
         } else {
           try {
             fs.unlinkSync(reasonPath);
-          } catch (e) {}
+          } catch (e) {
+            console.warn(`Unable to remove file at ${reasonPath}`);
+          }
         }
       }
     },
     visitor: {
       TypeAlias(
-        { node, hub } /*: {| node: DeclareTypeAlias, hub: Object |} */,
-        state /*: State */
-      ) {
+        { node, hub } /*: {| node: DeclareTypeAlias, hub: Object |} */
+      ) /*state : State */
+      {
         if (
           node.leadingComments &&
           node.leadingComments.map(getValue).some(isGenBindingsComment)
@@ -186,20 +156,24 @@ module.exports = function({ types: t } /*: {types: Object} */) {
           }
           const expandedType = JSON.parse(flowOutput.toString()).expanded_type;
           if (!expandedType) {
+            console.error(
+              "genBindings: Could not read output from Flow binary. Is `flow-bin` installed locally?"
+            );
             return;
           }
           const binding = fromJson(
             expandedType,
-            path.basename(hub.file.opts.filename),
+            hub.file.opts.filename,
+            loc.start.line,
             id.name
           );
           this.cache = this.cache + binding;
         }
       },
       ExportNamedDeclaration(
-        { node, hub } /*: {| node: ExportNamedDeclaration, hub: Object |} */,
-        state /*: State */
-      ) {
+        { node, hub } /*: {| node: ExportNamedDeclaration, hub: Object |} */
+      ) /*state: State */
+      {
         if (
           node.leadingComments &&
           node.leadingComments.map(getValue).some(isGenBindingsComment)
@@ -227,41 +201,15 @@ module.exports = function({ types: t } /*: {types: Object} */) {
                 return;
               }
               const declarationName = dec.id.name;
-              const reasonDecName = declarationName.toLowerCase();
 
               const binding = fromJson(
                 expandedType,
-                path.basename(hub.file.opts.filename),
+                hub.file.opts.filename,
+                loc.start.line,
                 declarationName
               );
               if (binding.length > 0) {
                 this.cache = this.cache + binding;
-              } else if (expandedType.kind === "Generic") {
-                const aliasedType = this.typeAliases[expandedType.type.name];
-                // TODO: Add missing aliasedType handling
-                if (!aliasedType) {
-                  throw Error("Missing alias type");
-                }
-                const binding = external(
-                  path.basename(hub.file.opts.filename),
-                  reasonDecName,
-                  ': Js.t(\'a) = ""'
-                );
-                const converterFromType = aliasedType.body.props
-                  .map(p => {
-                    if (p.kind === "NamedProp") {
-                      /* y: float, */
-                      return `${p.prop.name}: ${reasonDecName}##${p.prop.name}`;
-                    } else if (p.kind === "IndexProp") {
-                      /* ['y']: float, */
-                    } else {
-                      /* TODO: What else is there? */
-                    }
-                  })
-                  .filter(p => Boolean(p))
-                  .join(", ");
-                const converter = `let ${reasonDecName} = {${converterFromType}};`;
-                this.cache = this.cache + binding + converter;
               }
             });
           }

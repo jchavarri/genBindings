@@ -6,7 +6,10 @@ let rec emitType = t =>
   | Obj(obj) =>
     let recordFields = emitObjectFields(obj.objProps);
     {j|{ $recordFields }|j};
-  | _ => failwith("unsupported type")
+  | TypeAlias(_)
+  | Fun(_)
+  | Generic(_, _, _)
+  | Any => failwith("unsupported type")
   }
 and emitObjectFields = props =>
   props
@@ -58,8 +61,48 @@ let fromType = (typ, declarationName, baseName) => {
       {j|: Js.t({. $recordFields }) = "$originalName"|j},
     )
     ++ "\n";
-  | Generic(_symbol, _structural, _typeArgsOpt) =>
-    emitExternal(baseName, reasonDecName, {j|: Js.t('a) = ""|j}) ++ "\n"
+  | Generic(Symbol(provenance, name), _structural, _typeArgsOpt) =>
+    let maybeType =
+      switch (provenance) {
+      | Local(loc)
+      | Imported(loc)
+      | Remote(loc)
+      | Library(loc) =>
+        SymbolStore.getTypeAtPosition({
+          SymbolStore.filePath: loc.source,
+          line: loc.start.line,
+          typeName: name,
+        })
+      | Builtin => None
+      };
+    let conversion =
+      (
+        switch (maybeType) {
+        | Some(typ) =>
+          switch (typ) {
+          | Obj(obj) =>
+            let converterFromType =
+              obj.objProps
+              ->Belt.List.map(p =>
+                  switch (p) {
+                  | DecodeFlowJson.NamedProp(id, _namedProp) =>
+                    /* y: float, */
+                    {j|$id: $reasonDecName##$id|j}
+                  | IndexProp /* ['y']: float, */
+                  | CallProp => ""
+                  }
+                )
+              |> String.concat(", ");
+            "let " ++ reasonDecName ++ " = {" ++ converterFromType ++ "};";
+          | _ => ""
+          }
+        | None => ""
+        }
+      )
+      ++ "\n";
+
+    emitExternal(baseName, reasonDecName, {j|: Js.t('a) = ""|j})
+    ++ conversion;
   | TypeAlias({taName: _, taTparams: _, taType}) =>
     emitTypeDeclaration(reasonDecName, taType) ++ "\n"
   | Fun(f) =>

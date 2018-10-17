@@ -11,7 +11,7 @@ let ifNone = (opt, input, f) =>
 type t =
   | TypeAlias(typeAlias)
   | Obj(objT)
-  | Generic(symbol, bool /* structural */, option(list(t)))
+  | Generic(symbol, bool /* structural */, option(list(t)) /* type args */)
   | Fun(funT)
   | Num
   | Str
@@ -281,8 +281,11 @@ and decodeTypeArgs = json =>
 and decodeTypeAlias = json => {
   taName: json |> field("name", decodeSymbol),
   taTparams:
-    json |> field(
-         "typeParams", optional(array(typeParamDecoder) |> map(Array.to_list))),
+    json
+    |> field(
+         "typeParams",
+         optional(array(typeParamDecoder) |> map(Array.to_list)),
+       ),
   taType: json |> field("body", optional(decode)),
 }
 and decode = json =>
@@ -291,8 +294,7 @@ and decode = json =>
   |> (
     a =>
       switch (a) {
-      | "TypeAlias" =>
-        TypeAlias(json |> decodeTypeAlias);
+      | "TypeAlias" => TypeAlias(json |> decodeTypeAlias)
       | "Obj" => Obj(json |> objTDecode)
       | "Generic" =>
         Generic(
